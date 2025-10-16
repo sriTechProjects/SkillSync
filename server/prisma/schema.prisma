@@ -1,0 +1,192 @@
+// This is your Prisma schema file for the SkillSync project.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// ##         ENUMERATIONS                 ##
+// ==========================================
+
+// Defines the possible states of a skill exchange session
+enum SessionStatus {
+  PENDING
+  ACCEPTED
+  SCHEDULED
+  COMPLETED
+  DECLINED
+  CANCELED
+}
+
+// Defines if a skill is offered online or in person
+enum SessionType {
+  ONLINE
+  IN_PERSON
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+// ==========================================
+// ##         CORE MODELS                  ##
+// ==========================================
+
+model User {
+  id                String   @id @default(cuid())
+  email             String?  @unique // Changed: Now optional
+  firstName         String? // Changed: Now optional
+  lastName          String? // Changed: Now optional
+  username          String?  @unique // Changed: Now optional
+  passwordHash      String?
+  phoneNumber       String?  @unique
+  phoneVerified     Boolean  @default(false)
+  provider          String   @default("email")
+  providerId        String?
+  bio               String?
+  profilePicture    String?
+  creditBalance     Int      @default(10)
+  role              Role     @default(USER)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  isProfileComplete Boolean  @default(false)
+
+  // --- Relationships ---
+  skillsOffered       SkillOffered[]
+  skillsWanted        SkillWanted[]
+  sessionsAsProposer  Session[]            @relation("ProposerSessions")
+  sessionsAsProvider  Session[]            @relation("ProviderSessions")
+  reviewsGiven        Review[]             @relation("ReviewsGiven")
+  reviewsReceived     Review[]             @relation("ReviewsReceived")
+  sentMessages        Message[]
+  creditTransactions  CreditTransaction[]
+  categorySuggestions CategorySuggestion[]
+}
+
+model Otp {
+  id          String   @id @default(cuid())
+  phoneNumber String
+  code        String
+  expiresAt   DateTime
+
+  @@unique([phoneNumber, code])
+}
+
+model Category {
+  id   String @id @default(cuid())
+  name String @unique
+
+  // --- Relationships ---
+  skillsOffered SkillOffered[]
+  skillsWanted  SkillWanted[]
+}
+
+model CategorySuggestion {
+  id              String   @id @default(cuid())
+  name            String
+  status          String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  submittedByUser User     @relation(fields: [userId], references: [id])
+  userId          String
+  createdAt       DateTime @default(now())
+}
+
+model SkillOffered {
+  id          String      @id @default(cuid())
+  title       String
+  description String
+  creditValue Int
+  sessionType SessionType
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // --- Relationships ---
+  provider   User      @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  providerId String
+  category   Category  @relation(fields: [categoryId], references: [id])
+  categoryId String
+  sessions   Session[]
+}
+
+model SkillWanted {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  createdAt   DateTime @default(now())
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  category   Category? @relation(fields: [categoryId], references: [id])
+  categoryId String? // Optional: The user may or may not categorize their request
+}
+
+// ==========================================
+// ##      TRANSACTIONAL MODELS            ##
+// ==========================================
+
+model Session {
+  id            String        @id @default(cuid())
+  status        SessionStatus @default(PENDING)
+  proposedTime  DateTime? // Proposer suggests a time
+  confirmedTime DateTime? // Provider confirms the final time
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // --- Relationships ---
+  proposer           User                @relation("ProposerSessions", fields: [proposerId], references: [id], onDelete: Cascade)
+  proposerId         String
+  provider           User                @relation("ProviderSessions", fields: [providerId], references: [id], onDelete: Cascade)
+  providerId         String
+  skill              SkillOffered        @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId            String
+  messages           Message[]
+  reviews            Review[]
+  creditTransactions CreditTransaction[]
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  rating    Int // Rating from 1 to 5
+  comment   String?
+  createdAt DateTime @default(now())
+
+  // --- Relationships ---
+  session    Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId  String
+  reviewer   User    @relation("ReviewsGiven", fields: [reviewerId], references: [id], onDelete: NoAction)
+  reviewerId String
+  reviewee   User    @relation("ReviewsReceived", fields: [revieweeId], references: [id], onDelete: NoAction)
+  revieweeId String
+
+  @@unique([sessionId, reviewerId]) // A user can only review a session once
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  content   String
+  createdAt DateTime @default(now())
+
+  // --- Relationships ---
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String
+  sender    User    @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderId  String
+}
+
+model CreditTransaction {
+  id          String   @id @default(cuid())
+  amount      Int // Can be positive (earned) or negative (spent)
+  description String
+  createdAt   DateTime @default(now())
+
+  // --- Relationships ---
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  session   Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  sessionId String?
+}
